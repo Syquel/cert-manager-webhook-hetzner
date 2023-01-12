@@ -67,15 +67,43 @@ jobs:
 
       - name: Push Container Image To GitHub Container Registry
         if: ${{ github.ref == 'refs/heads/master' }}
-        uses: redhat-actions/push-to-registry@v2
-        with:
-          image: ${{ steps.build-image.outputs.image }}
-          tags: ${{ steps.build-image.outputs.tags }}
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          extra-args: |
-            --disable-content-trust
+        env:
+          IMAGE_NAME: ${{ steps.build-image.outputs.image }}
+          IMAGE_TAGS: ${{ steps.build-image.outputs.tags }}
+          IMAGE_REGISTRY: ${{ env.IMAGE_REGISTRY }}
+        run: |
+          if [ -z "${IMAGE_NAME}" ]; then
+            echo "Image name has not been provided" >&2
+            exit 1
+          fi
+          if [ -z "${IMAGE_TAGS}" ]; then
+            echo "No image tags have been provided" >&2
+            exit 2
+          fi
+          if [ -z "${IMAGE_REGISTRY}" ]; then
+            echo "Image registry has not been provided" >&2
+            exit 1
+          fi
+
+          # Construct registry URL and image tags.
+          # The registry name as well as the image name are normalized to lowercase.
+          REGISTRY_IMAGE_URL="${IMAGE_REGISTRY,,}/${IMAGE_NAME,,}"
+          readarray -d ' ' -t IMAGE_TAG_LIST < <(printf '%s' "${IMAGE_TAGS}")
+
+          # Log in to the registry
+          echo "Logging in to registry ${IMAGE_REGISTRY,,} with user ${{ github.actor }}"
+          podman login --password-stdin --username "${{ github.actor }}" "${IMAGE_REGISTRY,,}" < <(printf '%s' "${{ secrets.GITHUB_TOKEN }}")
+
+          # Push image for each provided tag
+          for IMAGE_TAG in "${IMAGE_TAG_LIST[@]}"; do
+            echo "Pushing image ${IMAGE_NAME} to ${REGISTRY_IMAGE_URL} with tag ${IMAGE_TAG}"
+
+            podman push --disable-content-trust "${IMAGE_NAME}" "${REGISTRY_IMAGE_URL}:${IMAGE_TAG}"
+          done
+
+          # Log out of the registry
+          echo "Logging out of registry ${IMAGE_REGISTRY,,}"
+          podman logout "${IMAGE_REGISTRY,,}"
 
       - name: Publish Helm Chart
         if: ${{ github.ref == 'refs/heads/master' }}
