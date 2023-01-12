@@ -1,54 +1,41 @@
-package main
+package internal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"io"
 	"io/ioutil"
-	"net/http"
-	"os"
-	"regexp"
-	"strings"
-
-	"github.com/jetstack/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
-	"github.com/jetstack/cert-manager/pkg/acme/webhook/cmd"
-	"github.com/vadimkim/cert-manager-webhook-hetzner/internal"
-	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog"
+	"net/http"
+	"regexp"
+	"strings"
 )
 
-var GroupName = os.Getenv("GROUP_NAME")
+const SolverName = "hetzner"
 
-func main() {
-	if GroupName == "" {
-		panic("GROUP_NAME must be specified")
-	}
-
-	cmd.RunWebhookServer(GroupName,
-		&hetznerDNSProviderSolver{},
-	)
-}
-
-type hetznerDNSProviderSolver struct {
+type HetznerDNSProviderSolver struct {
 	client *kubernetes.Clientset
 }
 
 type hetznerDNSProviderConfig struct {
 	SecretRef string `json:"secretName"`
-	ZoneName string  `json:"zoneName"`
-	ApiUrl string	 `json:"apiUrl"`
+	ZoneName  string `json:"zoneName"`
+	ApiUrl    string `json:"apiUrl"`
 }
 
-func (c *hetznerDNSProviderSolver) Name() string {
-	return "hetzner"
+func (c *HetznerDNSProviderSolver) Name() string {
+	return SolverName
 }
 
-func (c *hetznerDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
+func (c *HetznerDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	klog.V(6).Infof("call function Present: namespace=%s, zone=%s, fqdn=%s", ch.ResourceNamespace, ch.ResolvedZone, ch.ResolvedFQDN)
 
 	config, err := clientConfig(c, ch)
@@ -64,8 +51,7 @@ func (c *hetznerDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error 
 	return nil
 }
 
-
-func (c *hetznerDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
+func (c *HetznerDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 	config, err := clientConfig(c, ch)
 
 	if err != nil {
@@ -88,7 +74,7 @@ func (c *hetznerDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error 
 	}
 
 	// Unmarshall response
-	records := internal.RecordResponse{}
+	records := RecordResponse{}
 	readErr := json.Unmarshal(dnsRecords, &records)
 
 	if readErr != nil {
@@ -115,7 +101,7 @@ func (c *hetznerDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error 
 	return nil
 }
 
-func (c *hetznerDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
+func (c *HetznerDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
 	k8sClient, err := kubernetes.NewForConfig(kubeClientConfig)
 	klog.V(6).Infof("Input variable stopCh is %d length", len(stopCh))
 	if err != nil {
@@ -127,28 +113,7 @@ func (c *hetznerDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, sto
 	return nil
 }
 
-func loadConfig(cfgJSON *extapi.JSON) (hetznerDNSProviderConfig, error) {
-	cfg := hetznerDNSProviderConfig{}
-	// handle the 'base case' where no configuration has been provided
-	if cfgJSON == nil {
-		return cfg, nil
-	}
-	if err := json.Unmarshal(cfgJSON.Raw, &cfg); err != nil {
-		return cfg, fmt.Errorf("error decoding solver config: %v", err)
-	}
-
-	return cfg, nil
-}
-
-func stringFromSecretData(secretData *map[string][]byte, key string) (string, error) {
-	data, ok := (*secretData)[key]
-	if !ok {
-		return "", fmt.Errorf("key %q not found in secret data", key)
-	}
-	return string(data), nil
-}
-
-func addTxtRecord(config internal.Config, ch *v1alpha1.ChallengeRequest) {
+func addTxtRecord(config Config, ch *v1alpha1.ChallengeRequest) {
 	url := config.ApiUrl + "/records"
 
 	name := recordName(ch.ResolvedFQDN, config.ZoneName)
@@ -165,11 +130,11 @@ func addTxtRecord(config internal.Config, ch *v1alpha1.ChallengeRequest) {
 	if err != nil {
 		klog.Error(err)
 	}
-	klog.Infof("Added TXT record result: %s", string (add))
+	klog.Infof("Added TXT record result: %s", string(add))
 }
 
-func clientConfig(c *hetznerDNSProviderSolver, ch *v1alpha1.ChallengeRequest) (internal.Config, error) {
-	var config internal.Config
+func clientConfig(c *HetznerDNSProviderSolver, ch *v1alpha1.ChallengeRequest) (Config, error) {
+	var config Config
 
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
@@ -179,7 +144,7 @@ func clientConfig(c *hetznerDNSProviderSolver, ch *v1alpha1.ChallengeRequest) (i
 	config.ApiUrl = cfg.ApiUrl
 
 	secretName := cfg.SecretRef
-	sec, err := c.client.CoreV1().Secrets(ch.ResourceNamespace).Get(secretName, metav1.GetOptions{})
+	sec, err := c.client.CoreV1().Secrets(ch.ResourceNamespace).Get(context.TODO(), secretName, metav1.GetOptions{})
 
 	if err != nil {
 		return config, fmt.Errorf("unable to get secret `%s/%s`; %v", secretName, ch.ResourceNamespace, err)
@@ -195,7 +160,7 @@ func clientConfig(c *hetznerDNSProviderSolver, ch *v1alpha1.ChallengeRequest) (i
 	// Get ZoneName by api search if not provided by config
 	if config.ZoneName == "" {
 		foundZone, err := searchZoneName(config, ch.ResolvedZone)
-		if err!= nil {
+		if err != nil {
 			return config, err
 		}
 		config.ZoneName = foundZone
@@ -208,8 +173,8 @@ func clientConfig(c *hetznerDNSProviderSolver, ch *v1alpha1.ChallengeRequest) (i
 Domain name in Hetzner is divided in 2 parts: record + zone name. API works
 with record name that is FQDN without zone name. Sub-domains is a part of
 record name and is separated by "."
- */
-func recordName (fqdn string, domain string) string {
+*/
+func recordName(fqdn string, domain string) string {
 	r := regexp.MustCompile("(.+)\\." + domain + "\\.")
 	name := r.FindStringSubmatch(fqdn)
 	if len(name) != 2 {
@@ -219,7 +184,7 @@ func recordName (fqdn string, domain string) string {
 	return name[1]
 }
 
-func callDnsApi (url string, method string, body io.Reader, config internal.Config) ([]byte, error) {
+func callDnsApi(url string, method string, body io.Reader, config Config) ([]byte, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return []byte{}, fmt.Errorf("unable to execute request %v", err)
@@ -245,12 +210,12 @@ func callDnsApi (url string, method string, body io.Reader, config internal.Conf
 		return respBody, nil
 	}
 
-	text := "Error calling API status:" + resp.Status + " url: " +  url + " method: " + method
+	text := "Error calling API status:" + resp.Status + " url: " + url + " method: " + method
 	klog.Error(text)
 	return nil, errors.New(text)
 }
 
-func searchZoneId(config internal.Config) (string, error) {
+func searchZoneId(config Config) (string, error) {
 	url := config.ApiUrl + "/zones?name=" + config.ZoneName
 
 	// Get Zone configuration
@@ -261,7 +226,7 @@ func searchZoneId(config internal.Config) (string, error) {
 	}
 
 	// Unmarshall response
-	zones := internal.ZoneResponse{}
+	zones := ZoneResponse{}
 	readErr := json.Unmarshal(zoneRecords, &zones)
 
 	if readErr != nil {
@@ -274,10 +239,10 @@ func searchZoneId(config internal.Config) (string, error) {
 	return zones.Zones[0].Id, nil
 }
 
-func searchZoneName(config internal.Config, searchZone string) (string, error) {
+func searchZoneName(config Config, searchZone string) (string, error) {
 	parts := strings.Split(searchZone, ".")
 	parts = parts[:len(parts)-1]
-	for i := 0; i <= len(parts) - 2; i++ {
+	for i := 0; i <= len(parts)-2; i++ {
 		config.ZoneName = strings.Join(parts[i:], ".")
 		zoneId, _ := searchZoneId(config)
 		if zoneId != "" {
@@ -286,4 +251,25 @@ func searchZoneName(config internal.Config, searchZone string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("unable to find hetzner dns zone with: %s", searchZone)
+}
+
+func loadConfig(cfgJSON *extapi.JSON) (hetznerDNSProviderConfig, error) {
+	cfg := hetznerDNSProviderConfig{}
+	// handle the 'base case' where no configuration has been provided
+	if cfgJSON == nil {
+		return cfg, nil
+	}
+	if err := json.Unmarshal(cfgJSON.Raw, &cfg); err != nil {
+		return cfg, fmt.Errorf("error decoding solver config: %v", err)
+	}
+
+	return cfg, nil
+}
+
+func stringFromSecretData(secretData *map[string][]byte, key string) (string, error) {
+	data, ok := (*secretData)[key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in secret data", key)
+	}
+	return string(data), nil
 }

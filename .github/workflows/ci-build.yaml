@@ -1,0 +1,90 @@
+name: CI Workflow
+
+on:
+  push:
+    branches:
+      - master
+      - 'feature/*'
+      - 'bugfix/*'
+  pull_request:
+    branches:
+      - master
+  schedule:
+    - cron: '37 4 * * *'
+
+env:
+  IMAGE_NAME: cert-manager-webhook-hetzner
+  IMAGE_VERSION: 1.0.0
+  HELM_CHART_VERSION: 0.1.0
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Webhook
+        run: CGO_ENABLED=0 go build -v -buildmode=pie -buildvcs=false -ldflags="-s -w" ./cmd/webhook
+
+      - name: Build Container Image
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: ${{ env.IMAGE_NAME }}
+          tags: ${{ env.IMAGE_VERSION }} ${{ env.IMAGE_VERSION }}-${{ github.sha }}
+          containerfiles: |
+            ./Dockerfile
+          oci: true
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package Helm Chart
+        env:
+          IMAGE_REGISTRY_IMAGE: ${{ env.IMAGE_REGISTRY }}/${{ steps.build-image.outputs.image }}
+          HELM_CHART_PATH: ./deployments/helm
+        run: |
+          # Replace image.repository in Helm Chart by actual repository
+          yq -i '.image.repository = strenv(IMAGE_REGISTRY_IMAGE)' "${HELM_CHART_PATH}/values.yaml"
+
+          # Print Helm Chart templates
+          helm template --debug "${{ steps.build-image.outputs.image }}" "${HELM_CHART_PATH}"
+
+          # Lint Helm Chart
+          helm lint --strict "${HELM_CHART_PATH}"
+
+          # Package Helm Chart
+          helm package "${HELM_CHART_PATH}" --app-version "${IMAGE_VERSION}" --version "${HELM_CHART_VERSION}"
+
+      - name: Push Container Image To GitHub Container Registry
+        if: ${{ github.ref == 'refs/heads/master' }}
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          extra-args: |
+            --disable-content-trust
+
+      - name: Publish Helm Chart
+        if: ${{ github.ref == 'refs/heads/master' }}
+        run: |
+          # Log in to GitHub Container Registry
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login -u "${{ github.actor }}" --password-stdin "${IMAGE_REGISTRY}"
+
+          # Push Helm Chart
+          helm push "${{ steps.build-image.outputs.image }}-${HELM_CHART_VERSION}.tgz" "oci://${{ env.IMAGE_REGISTRY }}/${{ steps.build-image.outputs.image }}"
+
+          # Log out of GitHub Container Registry
+          helm registry logout "${IMAGE_REGISTRY}"
