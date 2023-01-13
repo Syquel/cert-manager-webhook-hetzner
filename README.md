@@ -18,7 +18,7 @@ Follow the [instructions](https://cert-manager.io/docs/installation/) using the 
 
 #### Using public helm chart
 ```bash
-helm repo add cert-manager-webhook-hetzner https://vadimkim.github.io/cert-manager-webhook-hetzner
+helm repo add cert-manager-webhook-hetzner oci://ghcr.io/syquel/charts/cert-manager-webhook-hetzner
 # Replace the groupName value with your desired domain
 helm install --namespace cert-manager cert-manager-webhook-hetzner cert-manager-webhook-hetzner/cert-manager-webhook-hetzner --set groupName=acme.yourdomain.tld
 ```
@@ -124,13 +124,4 @@ You can then run the test suite with:
 ./scripts/fetch-test-binaries.sh
 # then run the tests
 TEST_ZONE_NAME=example.com. make verify
-```
-
-## Creating new package
-
-To compile and publish new Helm chart version:
-```
-helm package deploy/cert-manager-webhook-hetzner
-git checkout gh-pages
-helm repo index . --url https://vadimkim.github.io/cert-manager-webhook-hetzner/
 ```
