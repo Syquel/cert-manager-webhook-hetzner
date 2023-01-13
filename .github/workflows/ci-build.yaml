@@ -107,12 +107,21 @@ jobs:
 
       - name: Publish Helm Chart
         if: ${{ github.ref == 'refs/heads/master' }}
+        env:
+          CHART_PATH: ${{ steps.build-image.outputs.image }}-${{ env.HELM_CHART_VERSION }}.tgz
+          IMAGE_REGISTRY: ${{ env.IMAGE_REGISTRY }}
         run: |
           # Log in to GitHub Container Registry
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login -u "${{ github.actor }}" --password-stdin "${IMAGE_REGISTRY}"
+          echo "Logging in to OCI repository ${IMAGE_REGISTRY,,}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login -u "${{ github.actor }}" --password-stdin "${IMAGE_REGISTRY,,}"
 
           # Push Helm Chart
-          helm push "${{ steps.build-image.outputs.image }}-${HELM_CHART_VERSION}.tgz" "oci://${{ env.IMAGE_REGISTRY }}/${{ steps.build-image.outputs.image }}"
+          CHART_REGISTRY_URL="oci://${IMAGE_REGISTRY,,}/charts"
+
+          echo "Pushing helm chart ${CHART_PATH} to ${CHART_REGISTRY_URL}"
+          export HELM_EXPERIMENTAL_OCI=1
+          helm push "${CHART_PATH}" "${CHART_REGISTRY_URL}"
 
           # Log out of GitHub Container Registry
-          helm registry logout "${IMAGE_REGISTRY}"
+          echo "Logging out of OCI repository ${IMAGE_REGISTRY,,}"
+          helm registry logout "${IMAGE_REGISTRY,,}"
