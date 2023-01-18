@@ -51,6 +51,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Normalize Container Image Repository
+        run: echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "${GITHUB_ENV}"
+
       - name: Package Helm Chart
         env:
           IMAGE_REGISTRY_IMAGE: ${{ env.IMAGE_REGISTRY }}/${{ steps.build-image.outputs.image }}
@@ -90,12 +93,12 @@ jobs:
 
           # Construct registry URL and image tags.
           # The registry name as well as the image name are normalized to lowercase.
-          REGISTRY_IMAGE_URL="${IMAGE_REGISTRY,,}/${IMAGE_NAME,,}"
+          REGISTRY_IMAGE_URL="${IMAGE_REGISTRY}/${IMAGE_NAME}"
           readarray -d ' ' -t IMAGE_TAG_LIST < <(printf '%s' "${IMAGE_TAGS}")
 
           # Log in to the registry
-          echo "Logging in to registry ${IMAGE_REGISTRY,,} with user ${{ github.actor }}"
-          podman login --password-stdin --username "${{ github.actor }}" "${IMAGE_REGISTRY,,}" < <(printf '%s' "${{ secrets.GITHUB_TOKEN }}")
+          echo "Logging in to registry ${IMAGE_REGISTRY} with user ${{ github.actor }}"
+          podman login --password-stdin --username "${{ github.actor }}" "${IMAGE_REGISTRY}" < <(printf '%s' "${{ secrets.GITHUB_TOKEN }}")
 
           # Push image for each provided tag
           for IMAGE_TAG in "${IMAGE_TAG_LIST[@]}"; do
@@ -105,8 +108,8 @@ jobs:
           done
 
           # Log out of the registry
-          echo "Logging out of registry ${IMAGE_REGISTRY,,}"
-          podman logout "${IMAGE_REGISTRY,,}"
+          echo "Logging out of registry ${IMAGE_REGISTRY}"
+          podman logout "${IMAGE_REGISTRY}"
 
       - name: Publish Helm Chart
         if: ${{ github.ref == 'refs/heads/master' }}
@@ -115,16 +118,16 @@ jobs:
           IMAGE_REGISTRY: ${{ env.IMAGE_REGISTRY }}
         run: |
           # Log in to GitHub Container Registry
-          echo "Logging in to OCI repository ${IMAGE_REGISTRY,,}"
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login -u "${{ github.actor }}" --password-stdin "${IMAGE_REGISTRY,,}"
+          echo "Logging in to OCI repository ${IMAGE_REGISTRY}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login -u "${{ github.actor }}" --password-stdin "${IMAGE_REGISTRY}"
 
           # Push Helm Chart
-          CHART_REGISTRY_URL="oci://${IMAGE_REGISTRY,,}/charts"
+          CHART_REGISTRY_URL="oci://${IMAGE_REGISTRY}/charts"
 
           echo "Pushing helm chart ${CHART_PATH} to ${CHART_REGISTRY_URL}"
           export HELM_EXPERIMENTAL_OCI=1
           helm push "${CHART_PATH}" "${CHART_REGISTRY_URL}"
 
           # Log out of GitHub Container Registry
-          echo "Logging out of OCI repository ${IMAGE_REGISTRY,,}"
-          helm registry logout "${IMAGE_REGISTRY,,}"
+          echo "Logging out of OCI repository ${IMAGE_REGISTRY}"
+          helm registry logout "${IMAGE_REGISTRY}"
