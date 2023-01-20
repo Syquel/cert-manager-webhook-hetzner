@@ -8,6 +8,46 @@ metadata:
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 ---
+# ClusterRole with permission to watch flowcontrol
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cert-manager-webhook-hetzner.fullname" . }}:flowcontrol-solver
+  labels:
+    app: {{ include "cert-manager-webhook-hetzner.name" . }}
+    chart: {{ include "cert-manager-webhook-hetzner.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+rules:
+  - apiGroups:
+      - "flowcontrol.apiserver.k8s.io"
+    resources:
+      - 'prioritylevelconfigurations'
+      - 'flowschemas'
+    verbs:
+      - 'list'
+      - 'watch'
+---
+# Grant webhook permission to watch flowcontrol
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cert-manager-webhook-hetzner.fullname" . }}:flowcontrol-solver
+  labels:
+    app: {{ include "cert-manager-webhook-hetzner.name" . }}
+    chart: {{ include "cert-manager-webhook-hetzner.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cert-manager-webhook-hetzner.fullname" . }}:flowcontrol-solver
+subjects:
+  - apiGroup: ""
+    kind: ServiceAccount
+    name: {{ include "cert-manager-webhook-hetzner.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+---
 # Grant the webhook permission to read the ConfigMap containing the Kubernetes
 # apiserver's requestheader-ca-certificate.
 # This ConfigMap is automatically created by the Kubernetes apiserver.
