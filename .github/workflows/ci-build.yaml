@@ -71,6 +71,12 @@ jobs:
           # Package Helm Chart
           helm package "${HELM_CHART_PATH}" --app-version "${IMAGE_VERSION}" --version "${HELM_CHART_VERSION}"
 
+      - name: Archive Helm Chart
+        uses: actions/upload-artifact@v3
+        with:
+          name: helm-chart
+          path: ${{ steps.build-image.outputs.image }}-${{ env.HELM_CHART_VERSION }}.tgz
+
       - name: Push Container Image To GitHub Container Registry
         if: ${{ github.ref == 'refs/heads/master' }}
         env:
